@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="100%" viewBox="0 0 1200 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="svg-title svg-desc">
+  <title id="svg-title">ai-subscription-usage</title>
+  <desc id="svg-desc">Claude Code and Codex session logs flow into a Rust aggregator, producing monthly usage JSON and rate-limit records for an Obsidian dashboard.</desc>
+  <style>
+    .eyebrow, .title, .tagline, .node-title, .node-sub, .flow-label { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif; }
+    .eyebrow { font-size: 12px; font-weight: 700; letter-spacing: 2.2px; fill: #534AB7; }
+    .title { font-size: 34px; font-weight: 650; fill: #2C2C2A; }
+    .tagline { font-size: 14px; fill: #5F5E5A; }
+    .node-title { font-size: 12px; font-weight: 650; fill: #2C2C2A; text-anchor: start; }
+    .node-sub { font-size: 11px; fill: #5F5E5A; text-anchor: start; }
+    .flow-label { font-size: 10px; font-weight: 650; letter-spacing: 1px; fill: #5F5E5A; text-anchor: middle; }
+    .gray-fill { fill: #F1EFE8; stroke: #5F5E5A; stroke-width: 1; }
+    .purple-fill { fill: #EEEDFE; stroke: #534AB7; stroke-width: 1.5; }
+    .teal-fill { fill: #E1F5EE; stroke: #0F6E56; stroke-width: 1; }
+    .dashboard-fill { fill: #FFFFFF; stroke: #5F5E5A; stroke-width: 1.2; }
+    .connector { fill: none; stroke: #5F5E5A; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+    .arrowhead { fill: none; stroke: #5F5E5A; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+    .pipeline-line { fill: none; stroke: #534AB7; stroke-width: 2; stroke-linecap: round; }
+    .dashboard-line { fill: none; stroke: #0F6E56; stroke-width: 2; stroke-linecap: round; }
+    .dashboard-bar { fill: #0F6E56; }
+    @media (prefers-color-scheme: dark) {
+      .eyebrow { fill: #AFA9EC; }
+      .title, .node-title { fill: #E5E5E2; }
+      .tagline, .node-sub { fill: #C7C5BD; }
+      .flow-label { fill: #B4B2A9; }
+      .gray-fill { fill: #444441; stroke: #B4B2A9; }
+      .purple-fill { fill: #3C3489; stroke: #AFA9EC; }
+      .teal-fill { fill: #085041; stroke: #5DCAA5; }
+      .dashboard-fill { fill: #292927; stroke: #B4B2A9; }
+      .connector, .arrowhead { stroke: #B4B2A9; }
+      .pipeline-line { stroke: #AFA9EC; }
+      .dashboard-line { stroke: #5DCAA5; }
+      .dashboard-bar { fill: #5DCAA5; }
+    }
+  </style>
+
+  <text class="eyebrow" x="52" y="116">RUST CLI · USAGE INTELLIGENCE</text>
+  <text class="title" x="50" y="163">ai-subscription-usage</text>
+  <text class="tagline" x="52" y="198">Local session logs become subscription insights</text>
+  <text class="tagline" x="52" y="220">inside your Obsidian vault.</text>
+
+  <!-- Two sources merge into one pipeline, split into two outputs, then merge at the dashboard. -->
+  <path class="connector" d="M566 112 C596 112 594 170 624 170"/>
+  <path class="arrowhead" d="M617 165 L624 170 L617 175"/>
+  <path class="connector" d="M566 228 C596 228 594 190 624 190"/>
+  <path class="arrowhead" d="M617 185 L624 190 L617 195"/>
+  <path class="connector" d="M770 170 C788 170 788 112 806 112"/>
+  <path class="arrowhead" d="M799 107 L806 112 L799 117"/>
+  <path class="connector" d="M770 190 C788 190 788 228 806 228"/>
+  <path class="arrowhead" d="M799 223 L806 228 L799 233"/>
+  <path class="connector" d="M956 112 C968 112 966 170 978 170"/>
+  <path class="arrowhead" d="M971 165 L978 170 L971 175"/>
+  <path class="connector" d="M956 228 C968 228 966 190 978 190"/>
+  <path class="arrowhead" d="M971 185 L978 190 L971 195"/>
+
+  <rect class="gray-fill" x="416" y="78" width="150" height="68" rx="10"/>
+  <path class="connector" d="M433 96 H449 L455 102 V127 H433 Z M449 96 V103 H455"/>
+  <line class="connector" x1="438" y1="111" x2="450" y2="111"/>
+  <line class="connector" x1="438" y1="118" x2="450" y2="118"/>
+  <text class="node-title" x="468" y="107">Claude Code</text>
+  <text class="node-sub" x="468" y="126">session logs</text>
+
+  <rect class="gray-fill" x="416" y="194" width="150" height="68" rx="10"/>
+  <path class="connector" d="M433 212 H449 L455 218 V243 H433 Z M449 212 V219 H455"/>
+  <line class="connector" x1="438" y1="227" x2="450" y2="227"/>
+  <line class="connector" x1="438" y1="234" x2="450" y2="234"/>
+  <text class="node-title" x="468" y="223">Codex</text>
+  <text class="node-sub" x="468" y="242">session logs</text>
+
+  <rect class="purple-fill" x="624" y="139" width="146" height="82" rx="12"/>
+  <path class="pipeline-line" d="M644 161 H663 M644 169 H676 M644 177 H669"/>
+  <circle class="purple-fill" cx="648" cy="197" r="5"/>
+  <circle class="purple-fill" cx="664" cy="197" r="5"/>
+  <line class="pipeline-line" x1="653" y1="197" x2="659" y2="197"/>
+  <text class="node-title" x="689" y="172">Aggregator</text>
+  <text class="node-sub" x="689" y="191">Rust pipeline</text>
+  <text class="flow-label" x="697" y="246">NORMALIZE · MERGE</text>
+
+  <rect class="teal-fill" x="806" y="78" width="150" height="68" rx="10"/>
+  <path class="dashboard-line" d="M822 96 H838 L844 102 V127 H822 Z M838 96 V103 H844"/>
+  <path class="dashboard-line" d="M827 113 H839 M827 120 H839"/>
+  <text class="node-title" x="858" y="107">Monthly usage</text>
+  <text class="node-sub" x="858" y="126">JSON</text>
+
+  <rect class="teal-fill" x="806" y="194" width="150" height="68" rx="10"/>
+  <circle class="dashboard-line" cx="833" cy="223" r="12"/>
+  <path class="dashboard-line" d="M833 211 V223 L841 228"/>
+  <text class="node-title" x="858" y="223">Rate limits</text>
+  <text class="node-sub" x="858" y="242">records</text>
+
+  <rect class="dashboard-fill" x="978" y="133" width="168" height="94" rx="12"/>
+  <circle class="dashboard-bar" cx="996" cy="150" r="2.5"/>
+  <circle class="dashboard-bar" cx="1005" cy="150" r="2.5"/>
+  <circle class="dashboard-bar" cx="1014" cy="150" r="2.5"/>
+  <line class="dashboard-line" x1="990" y1="159" x2="1134" y2="159"/>
+  <rect class="dashboard-bar" x="994" y="183" width="8" height="25" rx="2"/>
+  <rect class="dashboard-bar" x="1007" y="175" width="8" height="33" rx="2" opacity="0.78"/>
+  <rect class="dashboard-bar" x="1020" y="168" width="8" height="40" rx="2" opacity="0.56"/>
+  <path class="dashboard-line" d="M1042 202 C1056 195 1064 199 1076 185 S1096 180 1106 172 S1122 177 1132 166"/>
+  <text class="node-title" x="1062" y="180">Obsidian</text>
+  <text class="node-sub" x="1080" y="217">dashboard</text>
+  <text class="flow-label" x="1062" y="252">INSPECT · PLAN</text>
+</svg>
