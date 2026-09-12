@@ -60,7 +60,7 @@ ai-subscription-usage claude [OPTIONS] [limits]
 ai-subscription-usage claude limits
 ```
 
-ログインキーチェーン（項目 `Claude Code-credentials`．`security find-generic-password` で読む）からアクセストークンを読み，`GET https://api.anthropic.com/api/oauth/usage` を 1 回叩き，応答を長期記録の JSONL へ追記したうえで，JSONL 全体から `_limits.json` を作り直します．保存されている資格情報が既に失効していれば，通らないと分かっている要求を送らずにエラーで止まります．
+ログインキーチェーン（項目 `Claude Code-credentials`．`security find-generic-password` で読む）からアクセストークンを読み，`GET https://api.anthropic.com/api/oauth/usage` を 1 回叩き，応答を長期記録の JSONL へ追記したうえで，JSONL 全体から `_limits.json` を作り直します．アクセストークンが失効していても，リフレッシュトークンが非空で，その失効時刻が未来または不明なら，一時的な失効として扱います．stdout に失効時刻（JST の RFC3339，秒まで）と Claude Code の起動で更新される旨を表示し，API 取得を見送って正常終了します（終了コード `0`）．JSONL と前回の `_limits.json` は変更しません．リフレッシュトークンが無い・空・失効済みの場合は，失効時刻と `/login` による再ログインの案内を stderr に出してエラー終了します（終了コード `1`）．
 
 返ってくる % は **アカウント全体**（claude.ai / Cowork を含む）の値で，Claude Code だけの分ではありません．この但し書きは出力ファイル自身にも書き込んであり，ダッシュボードだけを見た人が取り違えないようにしてあります．
 
@@ -113,7 +113,7 @@ Codex の利用制限は **ログに残った観測値**であって API への�
 ## 終了状態と診断
 
 - `0` — 正常終了．書いたファイルは 1 つずつ `wrote <path>` として表示される．
-- `1` — 実行時エラー．stderr に `[ERROR] <メッセージ>` を出す（価格表が無い，入力ディレクトリが無い，資格情報が失効，HTTP 失敗，`limit.json` が壊れている等）．
+- `1` — 実行時エラー．stderr に `[ERROR] <メッセージ>` を出す（価格表が無い，入力ディレクトリが無い，アクセストークンが失効してリフレッシュトークンも使えない，HTTP 失敗，`limit.json` が壊れている等）．
 - `2` — clap がコマンドラインを解釈できなかった（操作の後ろにフラグを置いた場合など）．
 
 警告は stderr に `[WARN]` として出し，実行は止めません．JSON として読めない行は数えて読み飛ばし，版の分からない state は空から始める旨を告げ，集計中の利用制限の更新の失敗は記録したうえで月次 JSON は書き切ります．

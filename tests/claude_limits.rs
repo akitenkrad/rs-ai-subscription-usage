@@ -92,3 +92,162 @@ fn windows_are_skipped_without_observations() {
     )
     .is_none());
 }
+
+#[cfg(unix)]
+mod expired_credentials {
+    use assert_cmd::Command;
+    use serde_json::{json, Value};
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+    use tempfile::TempDir;
+
+    struct Fixture {
+        dir: TempDir,
+    }
+
+    impl Fixture {
+        fn new(oauth: Value) -> Self {
+            let dir = tempfile::tempdir().unwrap();
+            let bin = dir.path().join("bin");
+            fs::create_dir_all(&bin).unwrap();
+            let security = bin.join("security");
+            fs::write(
+                &security,
+                "#!/bin/sh\n/bin/cat \"$TEST_CLAUDE_CREDENTIALS\"\n",
+            )
+            .unwrap();
+            fs::set_permissions(&security, fs::Permissions::from_mode(0o700)).unwrap();
+            fs::write(
+                dir.path().join("credentials.json"),
+                json!({"claudeAiOauth": oauth}).to_string(),
+            )
+            .unwrap();
+            Self { dir }
+        }
+
+        fn output_dir(&self) -> std::path::PathBuf {
+            self.dir
+                .path()
+                .join("vault/_logs/_ai-subscription-usage/claude")
+        }
+
+        fn history_path(&self) -> std::path::PathBuf {
+            self.dir
+                .path()
+                .join("home/.local/share/ai-subscription-usage/claude/limits.jsonl")
+        }
+
+        fn command(&self) -> Command {
+            let mut command = Command::cargo_bin("ai-subscription-usage").unwrap();
+            command
+                .args(["claude", "limits"])
+                .env("HOME", self.dir.path().join("home"))
+                .env("OBSIDIAN_VAULT", self.dir.path().join("vault"))
+                .env("PATH", self.dir.path().join("bin"))
+                .env(
+                    "TEST_CLAUDE_CREDENTIALS",
+                    self.dir.path().join("credentials.json"),
+                );
+            command
+        }
+    }
+
+    fn refreshable_oauth() -> Value {
+        json!({
+            "accessToken": "dummy-access-SECRET",
+            "expiresAt": 1_000,
+            "refreshToken": "dummy-refresh-SECRET",
+            "refreshTokenExpiresAt": i64::MAX,
+        })
+    }
+
+    #[test]
+    fn temporary_expiration_succeeds_on_stdout_and_preserves_previous_files() {
+        for unknown_refresh_expiry in [false, true] {
+            let mut oauth = refreshable_oauth();
+            if unknown_refresh_expiry {
+                oauth
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("refreshTokenExpiresAt");
+            }
+            let fixture = Fixture::new(oauth);
+            let output_dir = fixture.output_dir();
+            let output_path = output_dir.join("_limits.json");
+            let history_path = fixture.history_path();
+            let previous_output = b"{\"latest\":{\"five_hour\":{\"utilization\":29.0}}}\n";
+            let previous_history = b"{\"fetched_at\":\"2026-09-10T00:00:00Z\"}\n";
+            fs::create_dir_all(&output_dir).unwrap();
+            fs::create_dir_all(history_path.parent().unwrap()).unwrap();
+            fs::write(&output_path, previous_output).unwrap();
+            fs::write(&history_path, previous_history).unwrap();
+            let output_modified = fs::metadata(&output_path).unwrap().modified().unwrap();
+            let history_modified = fs::metadata(&history_path).unwrap().modified().unwrap();
+
+            for _ in 0..2 {
+                fixture.command().assert().success().stderr("").stdout(
+                    "アクセストークンが失効しています (1970-01-01T09:00:01+09:00)．Claude Code を起動すると更新されます．今回の実測取得は見送り，前回の _limits.json をそのまま残します．\n",
+                );
+                assert_eq!(fs::read(&output_path).unwrap(), previous_output);
+                assert_eq!(fs::read(&history_path).unwrap(), previous_history);
+                assert_eq!(
+                    fs::metadata(&output_path).unwrap().modified().unwrap(),
+                    output_modified
+                );
+                assert_eq!(
+                    fs::metadata(&history_path).unwrap().modified().unwrap(),
+                    history_modified
+                );
+                assert_eq!(fs::read_dir(&output_dir).unwrap().count(), 1);
+                assert_eq!(
+                    fs::read_dir(history_path.parent().unwrap())
+                        .unwrap()
+                        .count(),
+                    1
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn temporary_expiration_does_not_create_output_or_history() {
+        let fixture = Fixture::new(refreshable_oauth());
+        fixture.command().assert().success().stderr("");
+        assert!(!fixture.output_dir().exists());
+        assert!(!fixture.history_path().parent().unwrap().exists());
+    }
+
+    #[test]
+    fn expiration_without_usable_refresh_token_fails_on_stderr() {
+        let cases = [
+            json!({"accessToken":"dummy-access-SECRET", "expiresAt":1_000}),
+            json!({"accessToken":"dummy-access-SECRET", "expiresAt":1_000, "refreshToken":""}),
+            json!({"accessToken":"dummy-access-SECRET", "expiresAt":1_000, "refreshToken":"dummy-refresh-SECRET", "refreshTokenExpiresAt":1_000}),
+        ];
+        for oauth in cases {
+            let fixture = Fixture::new(oauth);
+            fixture.command().assert().code(1).stdout("").stderr(
+                "[ERROR] Claudeの認証情報の有効期限が切れています (1970-01-01T09:00:01+09:00)．リフレッシュトークンも使えないため，Claude Code を起動して /login し直してください．\n",
+            );
+            assert!(!fixture.output_dir().exists());
+            assert!(!fixture.history_path().parent().unwrap().exists());
+        }
+    }
+
+    #[test]
+    fn unrepresentable_expiration_does_not_panic() {
+        let mut oauth = refreshable_oauth();
+        oauth["expiresAt"] = json!(i64::MIN);
+        let fixture = Fixture::new(oauth);
+        fixture
+            .command()
+            .assert()
+            .success()
+            .stderr("")
+            .stdout(predicates::str::contains(
+                "アクセストークンが失効しています",
+            ));
+        assert!(!fixture.output_dir().exists());
+        assert!(!fixture.history_path().parent().unwrap().exists());
+    }
+}

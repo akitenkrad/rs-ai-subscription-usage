@@ -60,7 +60,7 @@ A price table is mandatory: if `pricing.json` is missing or unreadable, the run 
 ai-subscription-usage claude limits
 ```
 
-Reads the OAuth access token from the login keychain (item `Claude Code-credentials`, via `security find-generic-password`), calls `GET https://api.anthropic.com/api/oauth/usage` once, appends the raw response to the long-term JSONL, and rebuilds `_limits.json` from the whole JSONL. If the stored credentials have already expired, it stops with an error rather than sending a request that would fail.
+Reads the OAuth access token from the login keychain (item `Claude Code-credentials`, via `security find-generic-password`), calls `GET https://api.anthropic.com/api/oauth/usage` once, appends the raw response to the long-term JSONL, and rebuilds `_limits.json` from the whole JSONL. If the access token has expired but a nonempty refresh token has a future or unknown expiry, the command treats this as temporary: it prints the expiration time (JST, RFC3339 to seconds) and instructions to start Claude Code on stdout, skips the API request, and exits successfully (`0`). The JSONL and previous `_limits.json` remain unchanged. If the refresh token is missing, empty, or expired, the command prints the expiration time and instructions to log in again with `/login` on stderr and exits with an error (`1`).
 
 The percentages this returns cover the **whole account** — claude.ai and Cowork included — not just Claude Code. That caveat is written into the output file itself so a reader of the dashboard cannot miss it.
 
@@ -113,7 +113,7 @@ Reserved. Invoking it exits with an error saying it is not implemented; use `cla
 ## Exit status and diagnostics
 
 - `0` — the run completed. Each file written is announced as `wrote <path>`.
-- `1` — a run-time error, printed as `[ERROR] <message>` on stderr: missing price table, missing source directory, expired credentials, an HTTP failure, a malformed `limit.json`.
+- `1` — a run-time error, printed as `[ERROR] <message>` on stderr: missing price table, missing source directory, an expired access token with no usable refresh token, an HTTP failure, a malformed `limit.json`.
 - `2` — clap could not parse the command line (for example, a flag placed after the operation).
 
 Warnings go to stderr as `[WARN]` and never abort the run: lines that are not valid JSON are counted and skipped, a state file at an unknown version is reported before starting from empty, and a failed limits update during aggregation is logged while the monthly JSON still gets written.

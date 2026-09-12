@@ -60,7 +60,9 @@ The vault files themselves need no special treatment beyond whatever backs up th
 
 **`キーチェーンから認証情報を読めません` (cannot read credentials from the keychain).** The `Claude Code-credentials` keychain item was not found, or access was denied. Confirm you are logged in to Claude Code, and allow keychain access when macOS asks. Note that the prompt appears on the terminal session, so the first run of `claude limits` is best done by hand rather than from launchd.
 
-**`Claudeの認証情報の有効期限が切れています` (credentials expired).** Re-authenticate in Claude Code; the token is refreshed there, not here.
+**`アクセストークンが失効しています` (access token expired).** A refresh token is still expected to work. The command prints a notice on stdout, skips this fetch, and exits successfully (`0`), preserving the JSONL and previous `_limits.json`. Start Claude Code to refresh the token. A nonempty refresh token with an unknown expiry is treated the same way.
+
+**`Claudeの認証情報の有効期限が切れています` (credentials expired).** The access token has expired and the refresh token is missing, empty, or expired. The command reports an error on stderr and exits with status `1`. Start Claude Code and log in again with `/login`.
 
 **`使用制限 API が HTTP 401 を返しました`.** The token was rejected. Re-authenticating usually resolves it. If the keychain item has been renamed by a newer Claude Code release, the read fails earlier, with the keychain message instead.
 

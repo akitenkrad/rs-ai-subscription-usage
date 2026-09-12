@@ -71,6 +71,10 @@ pub struct Credentials {
     pub access_token: String,
     /// 失効時刻 (epoch ミリ秒)．鍵が無いこともある．
     pub expires_at_ms: Option<i64>,
+    /// `claudeAiOauth.refreshToken` が非空で入っているか．
+    pub refresh_token_present: bool,
+    /// `claudeAiOauth.refreshTokenExpiresAt` (epoch ミリ秒)．鍵が無いこともある．
+    pub refresh_token_expires_at_ms: Option<i64>,
 }
 
 impl Credentials {
@@ -82,12 +86,23 @@ impl Credentials {
     pub fn is_expired(&self, now_ms: i64) -> bool {
         self.expires_at_ms.map(|e| e <= now_ms).unwrap_or(false)
     }
+
+    /// アクセストークンが更新され直す見込みがあるか．
+    ///
+    /// リフレッシュトークンの失効時刻が分からない場合は，更新できるとみなす．
+    pub fn can_refresh(&self, now_ms: i64) -> bool {
+        self.refresh_token_present
+            && self
+                .refresh_token_expires_at_ms
+                .map(|e| e > now_ms)
+                .unwrap_or(true)
+    }
 }
 
 /// キーチェーンが返す JSON から `claudeAiOauth` を取り出す．
 ///
-/// **エラーメッセージに入力をそのまま載せないこと．** 中身がアクセストークンそのものであり，
-/// ログ (launchd の .err) に残ると流出する．
+/// **エラーメッセージに入力をそのまま載せないこと．** アクセストークンと
+/// リフレッシュトークンを含んでおり，ログ (launchd の .err) に残ると流出する．
 pub fn parse_credentials(json: &str) -> Result<Credentials, String> {
     let v: Value = serde_json::from_str(json)
         .map_err(|_| "キーチェーンの中身が JSON として読めません".to_string())?;
@@ -106,6 +121,11 @@ pub fn parse_credentials(json: &str) -> Result<Credentials, String> {
     Ok(Credentials {
         access_token: token.to_string(),
         expires_at_ms: oauth.get("expiresAt").and_then(Value::as_i64),
+        refresh_token_present: oauth
+            .get("refreshToken")
+            .and_then(Value::as_str)
+            .is_some_and(|token| !token.is_empty()),
+        refresh_token_expires_at_ms: oauth.get("refreshTokenExpiresAt").and_then(Value::as_i64),
     })
 }
 
@@ -486,10 +506,56 @@ mod tests {
     }
 
     #[test]
+    fn キーチェーンの_json_からリフレッシュトークンの有無と失効時刻を取り出す() {
+        let c = parse_credentials(
+            r#"{"claudeAiOauth":{"accessToken":"access","refreshToken":"refresh","expiresAt":1789239872398,"refreshTokenExpiresAt":1790059942398}}"#,
+        )
+        .unwrap();
+        assert!(c.refresh_token_present);
+        assert_eq!(c.refresh_token_expires_at_ms, Some(1790059942398));
+    }
+
+    #[test]
+    fn リフレッシュトークンが無いか空なら更新できない() {
+        for json in [
+            r#"{"claudeAiOauth":{"accessToken":"access","refreshTokenExpiresAt":2000}}"#,
+            r#"{"claudeAiOauth":{"accessToken":"access","refreshToken":"","refreshTokenExpiresAt":2000}}"#,
+        ] {
+            let c = parse_credentials(json).unwrap();
+            assert!(!c.refresh_token_present);
+            assert!(!c.can_refresh(1_000));
+        }
+    }
+
+    #[test]
+    fn リフレッシュトークンの失効時刻以降は更新できない() {
+        let c = parse_credentials(
+            r#"{"claudeAiOauth":{"accessToken":"access","refreshToken":"refresh","refreshTokenExpiresAt":1000}}"#,
+        )
+        .unwrap();
+        assert!(c.can_refresh(999));
+        assert!(!c.can_refresh(1_000));
+        assert!(!c.can_refresh(1_001));
+    }
+
+    #[test]
+    fn リフレッシュトークンがあり失効時刻が無ければ更新できるとみなす() {
+        let c = parse_credentials(
+            r#"{"claudeAiOauth":{"accessToken":"access","refreshToken":"refresh"}}"#,
+        )
+        .unwrap();
+        assert!(c.refresh_token_present);
+        assert_eq!(c.refresh_token_expires_at_ms, None);
+        assert!(c.can_refresh(i64::MAX));
+    }
+
+    #[test]
     fn 失効時刻を過ぎたトークンを期限切れと判定する() {
         let c = Credentials {
             access_token: "t".into(),
             expires_at_ms: Some(1_000),
+            refresh_token_present: false,
+            refresh_token_expires_at_ms: None,
         };
         assert!(c.is_expired(1_000));
         assert!(c.is_expired(1_001));
@@ -502,6 +568,8 @@ mod tests {
         let c = Credentials {
             access_token: "t".into(),
             expires_at_ms: None,
+            refresh_token_present: false,
+            refresh_token_expires_at_ms: None,
         };
         assert!(!c.is_expired(i64::MAX));
     }
@@ -514,6 +582,19 @@ mod tests {
         assert!(!e.contains("SECRET"), "{e}");
         let e = parse_credentials("sk-ant-oat01-SECRET").unwrap_err();
         assert!(!e.contains("SECRET"), "{e}");
+    }
+
+    #[test]
+    fn 資格情報のエラーメッセージにリフレッシュトークンを載せない() {
+        for json in [
+            r#"{"claudeAiOauth":{"refreshToken":"REFRESH_SECRET"}}"#,
+            r#"{"claudeAiOauth":{"accessToken":"","refreshToken":"REFRESH_SECRET"}}"#,
+            r#"{"claudeAiOauth":{"accessToken":42,"refreshToken":"REFRESH_SECRET"}}"#,
+            r#"{"claudeAiOauth":{"refreshToken":"REFRESH_SECRET"}"#,
+        ] {
+            let e = parse_credentials(json).unwrap_err();
+            assert!(!e.contains("REFRESH_SECRET"), "{e}");
+        }
     }
 
     // ── JSONL ───────────────────────────────────────────────

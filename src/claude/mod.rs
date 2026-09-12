@@ -157,9 +157,23 @@ fn run_limits(config: &Config, output_dir: &std::path::Path) -> Result<()> {
     let now = Utc::now();
     let credentials = limits_api::read_keychain().map_err(Error::Message)?;
     if credentials.is_expired(now.timestamp_millis()) {
-        return Err(Error::Message(
-            "Claudeの認証情報の有効期限が切れています".into(),
-        ));
+        let expired_at = credentials
+            .expires_at_ms
+            .and_then(chrono::DateTime::<Utc>::from_timestamp_millis)
+            .map(|at| {
+                at.with_timezone(&jst())
+                    .to_rfc3339_opts(SecondsFormat::Secs, false)
+            })
+            .unwrap_or_else(|| "失効時刻不明".to_string());
+        if credentials.can_refresh(now.timestamp_millis()) {
+            println!(
+                "アクセストークンが失効しています ({expired_at})．Claude Code を起動すると更新されます．今回の実測取得は見送り，前回の _limits.json をそのまま残します．"
+            );
+            return Ok(());
+        }
+        return Err(Error::Message(format!(
+            "Claudeの認証情報の有効期限が切れています ({expired_at})．リフレッシュトークンも使えないため，Claude Code を起動して /login し直してください．"
+        )));
     }
     let fetched_at = now.to_rfc3339_opts(SecondsFormat::Secs, true);
     let record =
