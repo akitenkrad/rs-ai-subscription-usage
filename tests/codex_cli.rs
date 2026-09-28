@@ -352,3 +352,72 @@ fn monthly_usage_days_are_cut_on_jst() {
         serde_json::from_str(&fs::read_to_string(output).unwrap()).unwrap();
     assert_eq!(json["days"][0]["date"], "2026-09-28");
 }
+
+#[test]
+fn monthly_usage_excludes_ollama_models_but_preserves_state_records() {
+    let home = tempfile::tempdir().unwrap();
+    let vault = tempfile::tempdir().unwrap();
+    let sessions = home.path().join(".codex/sessions/2026/09/27");
+    fs::create_dir_all(&sessions).unwrap();
+    fs::write(
+        sessions.join("rollout-mixed-models.jsonl"),
+        concat!(
+            "{\"timestamp\":\"2026-09-27T01:00:00Z\",\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-5.6-sol\"}}\n",
+            "{\"timestamp\":\"2026-09-27T01:00:01Z\",\"type\":\"token_usage_record\",\"payload\":{\"session_id\":\"mixed\",\"response_id\":\"gpt-response\",\"usage\":{\"input_tokens\":100,\"cached_input_tokens\":40,\"output_tokens\":30,\"reasoning_output_tokens\":10}}}\n",
+            "{\"timestamp\":\"2026-09-27T01:00:02Z\",\"type\":\"turn_context\",\"payload\":{\"model\":\"gemma4:31b:cloud\"}}\n",
+            "{\"timestamp\":\"2026-09-27T01:00:03Z\",\"type\":\"token_usage_record\",\"payload\":{\"session_id\":\"mixed\",\"response_id\":\"gemma-response\",\"usage\":{\"input_tokens\":200,\"cached_input_tokens\":80,\"output_tokens\":60,\"reasoning_output_tokens\":20}}}\n",
+        ),
+    )
+    .unwrap();
+
+    let output = Command::cargo_bin("ai-subscription-usage")
+        .unwrap()
+        .args(["codex", "--month", "2026-09"])
+        .env("HOME", home.path())
+        .env("OBSIDIAN_VAULT", vault.path())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    let info_lines: Vec<&str> = stderr
+        .lines()
+        .filter(|line| line.starts_with("[INFO]"))
+        .collect();
+    assert_eq!(
+        info_lines,
+        ["[INFO] 月次集計から gemma4:31b:cloud を 1 リクエスト除外しました"]
+    );
+
+    let monthly_path = vault
+        .path()
+        .join("_logs/_ai-subscription-usage/codex/2026-09.json");
+    let monthly: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(monthly_path).unwrap()).unwrap();
+    let entries = monthly["days"][0]["entries"].as_array().unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0]["model"], "gpt-5.6-sol");
+    assert_eq!(entries[0]["requests"], 1);
+    assert_eq!(entries[0]["input"], 100);
+    assert_eq!(entries[0]["cached_input"], 40);
+    assert_eq!(entries[0]["output"], 30);
+    assert_eq!(entries[0]["reasoning_output"], 10);
+
+    let state_path = home
+        .path()
+        .join(".local/share/ai-subscription-usage/codex/state.json");
+    let state: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(state_path).unwrap()).unwrap();
+    let records = state["files"].as_object().unwrap().values().next().unwrap()["records"]
+        .as_array()
+        .unwrap();
+    let mut state_models: Vec<&str> = records
+        .iter()
+        .map(|record| record["model"].as_str().unwrap())
+        .collect();
+    state_models.sort_unstable();
+    assert_eq!(state_models, ["gemma4:31b:cloud", "gpt-5.6-sol"]);
+}

@@ -22,6 +22,17 @@ use std::path::{Path, PathBuf};
 
 pub const PROVIDER: &str = "codex";
 
+/// Codex の月次集計へ残す OpenAI モデルかを判定する．
+///
+/// `openai_base_url` をローカル Ollama に向けたセッションも `model_provider` が
+/// `openai` と記録されるため，provider では区別できない．そこで，Ollama 形式の
+/// タグ付き名 (`:` を含む名前) だけを除外する．ただし，OpenAI のファインチューニング名
+/// `ft:gpt-4o-mini:org::id` は残す．未知の名前やモデル不明 (`None`) も，OpenAI の
+/// 使用量を落とさないことを優先して残す．
+pub fn is_openai_model(model: Option<&str>) -> bool {
+    model.is_none_or(|name| !name.contains(':') || name.starts_with("ft:"))
+}
+
 /// 1 つの «席» (primary / secondary) の観測値．
 ///
 /// `window_minutes` は枠の長さ (300 = 5 時間，10080 = 週) だが，**どちらの席がどの長さかは
@@ -646,10 +657,15 @@ pub fn run(args: crate::cli::ProviderArgs) -> crate::Result<()> {
     }
     let mut days: BTreeMap<String, BTreeMap<(String, Scope), (u64, u64, u64, u64, u64, u64)>> =
         BTreeMap::new();
+    let mut excluded_models: BTreeMap<String, u64> = BTreeMap::new();
     for r in records {
         let d = usage_day(r.timestamp);
         let m = d[..7].to_string();
         if args.month.as_deref().map(|x| x != m).unwrap_or(false) {
+            continue;
+        }
+        if !is_openai_model(r.model.as_deref()) {
+            *excluded_models.entry(r.model.unwrap()).or_default() += 1;
             continue;
         }
         let model = r.model.unwrap_or_else(|| "unknown".into());
@@ -664,6 +680,9 @@ pub fn run(args: crate::cli::ProviderArgs) -> crate::Result<()> {
         e.3 += r.tokens.output;
         e.4 += r.tokens.reasoning_output;
         e.5 += r.tokens.cache_writes.values().sum::<u64>();
+    }
+    for (model, requests) in excluded_models {
+        eprintln!("[INFO] 月次集計から {model} を {requests} リクエスト除外しました");
     }
     if args.dry_run {
         if let Err(e) = update_limits(&c, &scan.observations, true) {

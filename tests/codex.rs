@@ -1,4 +1,21 @@
-use ai_subscription_usage::codex::{aggregate_file, parse_line, ParseOutcome, Scope};
+use ai_subscription_usage::codex::{
+    aggregate_file, is_openai_model, parse_line, ParseOutcome, Scope,
+};
+
+#[test]
+fn openai_model_detection_keeps_unknowns_and_excludes_ollama_tags() {
+    for (model, expected) in [
+        (Some("gpt-5.6-sol"), true),
+        (Some("o3"), true),
+        (Some("codex-mini-latest"), true),
+        (Some("ft:gpt-4o-mini:org::abc"), true),
+        (None, true),
+        (Some("gemma4:31b:cloud"), false),
+        (Some("llama3.1:8b"), false),
+    ] {
+        assert_eq!(is_openai_model(model), expected, "model={model:?}");
+    }
+}
 
 #[test]
 fn fixture_counts_only_usage_records_and_deduplicates_response_id() {
