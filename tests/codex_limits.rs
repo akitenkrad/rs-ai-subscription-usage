@@ -181,6 +181,28 @@ fn no_observation_produces_no_output_at_all() {
 }
 
 #[test]
+fn empty_newer_observation_does_not_replace_valid_output() {
+    let valid = observation(&line_at("2026-09-27T12:00:00Z", 42.0, 10080));
+    let empty = RateLimitsObservation {
+        observed_at: chrono::DateTime::parse_from_rfc3339("2026-09-28T07:41:25Z")
+            .unwrap()
+            .to_utc(),
+        limit_id: None,
+        plan_type: None,
+        primary: None,
+        secondary: None,
+        credits: None,
+        raw: None,
+    };
+
+    assert!(build_output(std::slice::from_ref(&empty), "now", jst(2026, 9, 28)).is_none());
+    let out = build_output(&[valid, empty], "now", jst(2026, 9, 28)).unwrap();
+    assert_eq!(out.observed_at, "2026-09-27T12:00:00+00:00");
+    assert_eq!(out.rate_limits.primary.unwrap().used_percent, 42.0);
+    assert_eq!(out.history.last().unwrap().observed_at, out.observed_at);
+}
+
+#[test]
 fn broken_jsonl_rows_do_not_hide_the_other_observations() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("limits.jsonl");
@@ -274,7 +296,12 @@ fn the_latest_point_survives_even_when_it_is_not_the_days_peak() {
     .collect();
     append_jsonl(&path, &obs).unwrap();
 
-    let out = build_output(&read_jsonl(&path).unwrap().observations, "now", jst(2026, 9, 10)).unwrap();
+    let out = build_output(
+        &read_jsonl(&path).unwrap().observations,
+        "now",
+        jst(2026, 9, 10),
+    )
+    .unwrap();
     // 画面の «いま 3%» と折れ線の右端が食い違ってはいけない．
     assert_eq!(out.observed_at, "2026-09-09T23:00:00+00:00");
     assert_eq!(
@@ -298,7 +325,12 @@ fn days_are_cut_on_jst_not_utc() {
     .collect();
     append_jsonl(&path, &obs).unwrap();
 
-    let out = build_output(&read_jsonl(&path).unwrap().observations, "now", jst(2026, 9, 10)).unwrap();
+    let out = build_output(
+        &read_jsonl(&path).unwrap().observations,
+        "now",
+        jst(2026, 9, 10),
+    )
+    .unwrap();
     assert_eq!(out.history.len(), 1, "JST の同じ日は 1 点にまとまる");
     assert_eq!(out.history[0].primary_pct, Some(20.0));
 }
@@ -309,9 +341,18 @@ fn the_whole_rate_limits_object_is_kept_for_later() {
     let line = r#"{"timestamp":"2026-09-09T01:00:00Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex","limit_name":"weekly","primary":{"used_percent":1.0,"window_minutes":10080,"resets_at":1789614195},"secondary":null,"plan_type":"prolite","spend_control_reached":true,"rate_limit_reached_type":"weekly"}}}"#;
     let o = observation(line);
     let raw = o.raw.as_ref().expect("生の rate_limits を抱えていない");
-    assert_eq!(raw.get("spend_control_reached").and_then(|v| v.as_bool()), Some(true));
-    assert_eq!(raw.get("rate_limit_reached_type").and_then(|v| v.as_str()), Some("weekly"));
-    assert_eq!(raw.get("limit_name").and_then(|v| v.as_str()), Some("weekly"));
+    assert_eq!(
+        raw.get("spend_control_reached").and_then(|v| v.as_bool()),
+        Some(true)
+    );
+    assert_eq!(
+        raw.get("rate_limit_reached_type").and_then(|v| v.as_str()),
+        Some("weekly")
+    );
+    assert_eq!(
+        raw.get("limit_name").and_then(|v| v.as_str()),
+        Some("weekly")
+    );
 
     // JSONL を往復しても失われないこと．
     let dir = tempfile::tempdir().unwrap();
@@ -319,7 +360,11 @@ fn the_whole_rate_limits_object_is_kept_for_later() {
     append_jsonl(&path, &[o]).unwrap();
     let back = &read_jsonl(&path).unwrap().observations[0];
     assert_eq!(
-        back.raw.as_ref().unwrap().get("spend_control_reached").and_then(|v| v.as_bool()),
+        back.raw
+            .as_ref()
+            .unwrap()
+            .get("spend_control_reached")
+            .and_then(|v| v.as_bool()),
         Some(true),
         "長期記録を読み直したら未知の欄が消えていた"
     );
@@ -356,7 +401,11 @@ fn a_file_already_scanned_before_limits_existed_is_read_once_more() {
         cmd.env("HOME", &home).env("OBSIDIAN_VAULT", &vault);
         cmd.args(args);
         let out = cmd.output().unwrap();
-        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
     };
 
     // 1) 利用制限を知らなかった頃と同じ状態を作る — 月次集計だけを走らせ，
@@ -384,4 +433,58 @@ fn a_file_already_scanned_before_limits_existed_is_read_once_more() {
     // 3) 2 度目からは読み飛ばしてよい (印が付いたので行は増えない)．
     run(vec!["codex", "limits"]);
     assert_eq!(std::fs::read_to_string(&jsonl).unwrap().lines().count(), 2);
+}
+
+#[test]
+fn empty_state_observation_is_not_reappended_to_jsonl() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    let vault = dir.path().join("vault");
+    let sessions = home.join(".codex/sessions/2026/09/27");
+    std::fs::create_dir_all(&sessions).unwrap();
+    std::fs::create_dir_all(&vault).unwrap();
+    std::fs::write(
+        sessions.join("rollout-test.jsonl"),
+        format!("{}\n", line_at("2026-09-27T12:00:00Z", 42.0, 10080)),
+    )
+    .unwrap();
+
+    let run = || {
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_ai-subscription-usage"))
+            .env("HOME", &home)
+            .env("OBSIDIAN_VAULT", &vault)
+            .args(["codex", "limits"])
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+
+    run();
+    let state_path = home.join(".local/share/ai-subscription-usage/codex/state.json");
+    let mut state: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&state_path).unwrap()).unwrap();
+    for file in state["files"].as_object_mut().unwrap().values_mut() {
+        file["rate_limits"] = serde_json::json!({
+            "observed_at": "2026-09-28T07:41:25Z",
+            "limit_id": null,
+            "plan_type": null,
+            "primary": null,
+            "secondary": null,
+            "credits": null
+        });
+    }
+    std::fs::write(&state_path, serde_json::to_vec_pretty(&state).unwrap()).unwrap();
+
+    let jsonl = home.join(".local/share/ai-subscription-usage/codex/limits.jsonl");
+    assert_eq!(std::fs::read_to_string(&jsonl).unwrap().lines().count(), 1);
+    run();
+    assert_eq!(
+        std::fs::read_to_string(&jsonl).unwrap().lines().count(),
+        1,
+        "state の空観測を JSONL へ戻している"
+    );
 }

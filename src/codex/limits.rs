@@ -237,10 +237,7 @@ pub struct LimitsOutput {
 ///
 /// 間引くのは vault へ出す `history` だけで，[`JSONL`](append_observations) は
 /// 全期間・全点を持ったままである．遡りたければそちらを読む．
-fn thin_history(
-    sorted: &[&RateLimitsObservation],
-    cutoff: DateTime<Utc>,
-) -> Vec<HistoryRow> {
+fn thin_history(sorted: &[&RateLimitsObservation], cutoff: DateTime<Utc>) -> Vec<HistoryRow> {
     // 日の区切りは JST．vault の時刻はすべて JST で読むので，UTC で切ると
     // 日本時間の朝と前夜が同じ «日» に入る．
     let jst = FixedOffset::east_opt(9 * 3600).expect("+09:00");
@@ -257,7 +254,7 @@ fn thin_history(
     let live: Vec<&RateLimitsObservation> = sorted
         .iter()
         .copied()
-        .filter(|o| o.observed_at >= cutoff)
+        .filter(|o| has_usable_window(o) && o.observed_at >= cutoff)
         .collect();
     let Some(latest) = live.last().copied() else {
         return Vec::new();
@@ -266,8 +263,7 @@ fn thin_history(
     let mut peak: std::collections::BTreeMap<chrono::NaiveDate, &RateLimitsObservation> =
         std::collections::BTreeMap::new();
     for o in &live {
-        peak
-            .entry(day_of(o))
+        peak.entry(day_of(o))
             .and_modify(|best| {
                 // 同じ高さなら後の観測を採る (その日の «到達点» の時刻に寄せる)．
                 if height(o) >= height(best) {
@@ -277,10 +273,13 @@ fn thin_history(
             .or_insert(o);
     }
     // 最新の点は必ず入れる．その日の最大が別の点でも，右端だけは実際の «いま» にする．
-    peak.insert(day_of(latest), match peak.get(&day_of(latest)) {
-        Some(best) if best.observed_at > latest.observed_at => best,
-        _ => latest,
-    });
+    peak.insert(
+        day_of(latest),
+        match peak.get(&day_of(latest)) {
+            Some(best) if best.observed_at > latest.observed_at => best,
+            _ => latest,
+        },
+    );
 
     let mut rows: Vec<&RateLimitsObservation> = peak.into_values().collect();
     rows.sort_by_key(|o| o.observed_at);
@@ -300,7 +299,10 @@ pub fn build_output(
     updated_at: &str,
     now: DateTime<FixedOffset>,
 ) -> Option<LimitsOutput> {
-    let mut sorted: Vec<&RateLimitsObservation> = observations.iter().collect();
+    let mut sorted: Vec<&RateLimitsObservation> = observations
+        .iter()
+        .filter(|o| has_usable_window(o))
+        .collect();
     sorted.sort_by_key(|o| o.observed_at);
     let latest = *sorted.last()?;
 
@@ -324,6 +326,10 @@ pub fn build_output(
         history_days: HISTORY_DAYS,
         history,
     })
+}
+
+pub(crate) fn has_usable_window(o: &RateLimitsObservation) -> bool {
+    o.primary.is_some() || o.secondary.is_some()
 }
 
 fn history_row(o: &RateLimitsObservation) -> HistoryRow {

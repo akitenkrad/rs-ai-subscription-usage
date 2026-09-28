@@ -155,12 +155,18 @@ fn parse_window(v: &Value) -> Option<RateLimitWindow> {
 
 fn parse_rate_limits(v: &Value, observed_at: DateTime<Utc>) -> Option<RateLimitsObservation> {
     let limits = v.get("rate_limits")?;
+    limits.as_object()?;
+    let primary = limits.get("primary").and_then(parse_window);
+    let secondary = limits.get("secondary").and_then(parse_window);
+    if primary.is_none() && secondary.is_none() {
+        return None;
+    }
     Some(RateLimitsObservation {
         observed_at,
         limit_id: string_at(limits, "limit_id"),
         plan_type: string_at(limits, "plan_type"),
-        primary: limits.get("primary").and_then(parse_window),
-        secondary: limits.get("secondary").and_then(parse_window),
+        primary,
+        secondary,
         raw: Some(limits.clone()),
         credits: limits.get("credits").map(|c| Credits {
             has_credits: c
@@ -518,7 +524,12 @@ fn update_limits(
             stored.broken_lines
         );
     }
-    let fresh = limits::new_observations(&stored.observations, observations);
+    let usable: Vec<RateLimitsObservation> = observations
+        .iter()
+        .filter(|o| limits::has_usable_window(o))
+        .cloned()
+        .collect();
+    let fresh = limits::new_observations(&stored.observations, &usable);
     let mut all = stored.observations;
     all.extend(fresh.iter().cloned());
     let out_path = c.codex_output_dir().join(limits::OUTPUT_FILE);
@@ -572,6 +583,13 @@ fn update_limits(
 
 fn now_jst() -> chrono::DateTime<chrono::FixedOffset> {
     chrono::Utc::now().with_timezone(&crate::common::date::jst())
+}
+
+fn usage_day(timestamp: DateTime<Utc>) -> String {
+    timestamp
+        .with_timezone(&crate::common::date::jst())
+        .format("%Y-%m-%d")
+        .to_string()
 }
 
 fn write_state(state: &State, state_path: &Path) -> crate::Result<()> {
@@ -629,7 +647,7 @@ pub fn run(args: crate::cli::ProviderArgs) -> crate::Result<()> {
     let mut days: BTreeMap<String, BTreeMap<(String, Scope), (u64, u64, u64, u64, u64, u64)>> =
         BTreeMap::new();
     for r in records {
-        let d = r.timestamp.format("%Y-%m-%d").to_string();
+        let d = usage_day(r.timestamp);
         let m = d[..7].to_string();
         if args.month.as_deref().map(|x| x != m).unwrap_or(false) {
             continue;
@@ -667,7 +685,10 @@ pub fn run(args: crate::cli::ProviderArgs) -> crate::Result<()> {
     // 引き直して束ね直すだけでよい．
     let mut by_month: BTreeMap<String, BTreeMap<String, _>> = BTreeMap::new();
     for (d, es) in days {
-        by_month.entry(d[..7].to_string()).or_default().insert(d, es);
+        by_month
+            .entry(d[..7].to_string())
+            .or_default()
+            .insert(d, es);
     }
     let dir = c.codex_output_dir();
     if !by_month.is_empty() {

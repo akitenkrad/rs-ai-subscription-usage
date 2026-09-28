@@ -228,7 +228,12 @@ fn a_run_without_month_writes_one_file_per_month() {
     std::fs::create_dir_all(&vault).unwrap();
 
     let write_day = |ymd: &str, id: &str| {
-        let day = home.join(format!(".codex/sessions/{}/{}/{}", &ymd[..4], &ymd[5..7], &ymd[8..10]));
+        let day = home.join(format!(
+            ".codex/sessions/{}/{}/{}",
+            &ymd[..4],
+            &ymd[5..7],
+            &ymd[8..10]
+        ));
         std::fs::create_dir_all(&day).unwrap();
         let ts = format!("{ymd}T01:00:00Z");
         std::fs::write(
@@ -249,10 +254,17 @@ fn a_run_without_month_writes_one_file_per_month() {
         .arg("codex")
         .output()
         .unwrap();
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 
     let codex_dir = vault.join("_logs/_ai-subscription-usage/codex");
-    for (file, day) in [("2026-08.json", "2026-08-19"), ("2026-09.json", "2026-09-05")] {
+    for (file, day) in [
+        ("2026-08.json", "2026-08-19"),
+        ("2026-09.json", "2026-09-05"),
+    ] {
         let path = codex_dir.join(file);
         assert!(path.exists(), "{file} が書かれていない");
         let v: serde_json::Value =
@@ -276,7 +288,12 @@ fn month_filters_which_files_are_written() {
     let vault = dir.path().join("vault");
     std::fs::create_dir_all(&vault).unwrap();
     for (ymd, id) in [("2026-08-19", "a"), ("2026-09-05", "b")] {
-        let day = home.join(format!(".codex/sessions/{}/{}/{}", &ymd[..4], &ymd[5..7], &ymd[8..10]));
+        let day = home.join(format!(
+            ".codex/sessions/{}/{}/{}",
+            &ymd[..4],
+            &ymd[5..7],
+            &ymd[8..10]
+        ));
         std::fs::create_dir_all(&day).unwrap();
         let ts = format!("{ymd}T01:00:00Z");
         std::fs::write(
@@ -294,11 +311,44 @@ fn month_filters_which_files_are_written() {
         .args(["codex", "--month", "2026-09"])
         .output()
         .unwrap();
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let codex_dir = vault.join("_logs/_ai-subscription-usage/codex");
     assert!(codex_dir.join("2026-09.json").exists());
     assert!(
         !codex_dir.join("2026-08.json").exists(),
         "--month で絞ったのに他の月まで書いている"
     );
+}
+
+#[test]
+fn monthly_usage_days_are_cut_on_jst() {
+    let home = tempfile::tempdir().unwrap();
+    let vault = tempfile::tempdir().unwrap();
+    let sessions = home.path().join(".codex/sessions/2026/09/27");
+    fs::create_dir_all(&sessions).unwrap();
+    fs::write(
+        sessions.join("rollout-test.jsonl"),
+        r#"{"timestamp":"2026-09-27T16:30:00Z","type":"token_usage_record","payload":{"session_id":"s","response_id":"r","usage":{"input_tokens":1,"output_tokens":1}}}
+"#,
+    )
+    .unwrap();
+
+    Command::cargo_bin("ai-subscription-usage")
+        .unwrap()
+        .args(["codex", "--month", "2026-09"])
+        .env("HOME", home.path())
+        .env("OBSIDIAN_VAULT", vault.path())
+        .assert()
+        .success();
+
+    let output = vault
+        .path()
+        .join("_logs/_ai-subscription-usage/codex/2026-09.json");
+    let json: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(output).unwrap()).unwrap();
+    assert_eq!(json["days"][0]["date"], "2026-09-28");
 }

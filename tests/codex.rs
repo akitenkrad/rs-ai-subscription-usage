@@ -58,3 +58,25 @@ fn event_msg_token_count_is_not_a_usage_record() {
         ParseOutcome::Record(_) | ParseOutcome::Anomalous { .. }
     ));
 }
+
+#[test]
+fn token_count_with_null_rate_limits_is_skipped() {
+    let line = r#"{"timestamp":"2026-09-28T07:41:25.529Z","type":"event_msg","payload":{"type":"token_count","info":{},"rate_limits":null}}"#;
+    assert_eq!(parse_line(line, None, None), ParseOutcome::Skip);
+}
+
+#[test]
+fn token_count_without_a_readable_window_is_skipped() {
+    let line = r#"{"timestamp":"2026-09-28T07:41:25.529Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex","primary":null,"secondary":null,"plan_type":"plus"}}}"#;
+    assert_eq!(parse_line(line, None, None), ParseOutcome::Skip);
+}
+
+#[test]
+fn token_count_with_only_primary_window_is_kept() {
+    let line = r#"{"timestamp":"2026-09-28T07:41:25.529Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex","primary":{"used_percent":12.5,"window_minutes":10080,"resets_at":1790581285},"secondary":null,"plan_type":"plus"}}}"#;
+    let ParseOutcome::RateLimits(observation) = parse_line(line, None, None) else {
+        panic!("expected rate limits");
+    };
+    assert_eq!(observation.primary.unwrap().used_percent, 12.5);
+    assert!(observation.secondary.is_none());
+}
